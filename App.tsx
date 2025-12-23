@@ -98,7 +98,7 @@ const App: React.FC = () => {
             </div>
           )}
 
-          <UbuntuIntegration currentImageUrl={selectedWallpaper?.url || ''} />
+          <UbuntuIntegration wallpaper={selectedWallpaper} />
 
           {/* AI Generation Section */}
           <section className="glass p-8 rounded-3xl border border-[#E95420]/20">

@@ -1,50 +1,67 @@
 
 import React, { useState } from 'react';
+import { Wallpaper } from '../types';
 
 interface UbuntuIntegrationProps {
-  currentImageUrl: string;
+  wallpaper: Wallpaper | null;
 }
 
-const UbuntuIntegration: React.FC<UbuntuIntegrationProps> = ({ currentImageUrl }) => {
+const UbuntuIntegration: React.FC<UbuntuIntegrationProps> = ({ wallpaper }) => {
   const [copiedType, setCopiedType] = useState<'current' | 'auto' | null>(null);
-  const [activeTab, setActiveTab] = useState<'current' | 'auto'>('auto');
+  const [activeTab, setActiveTab] = useState<'auto' | 'auto'>('auto');
+
+  const safeTitle = wallpaper?.title.replace(/[^a-z0-9]/gi, '-').toLowerCase() || 'wallpaper';
+  const currentDate = new Date().toISOString().split('T')[0];
 
   const currentScript = `
-# 修复：确保脚本能找到桌面会话（防止黑屏）
+# 修复环境变量，确保能够设置壁纸
 export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
 
-URL="${currentImageUrl}"
-DEST="$HOME/Pictures/ubuntu_wallpaper.jpg"
+URL="${wallpaper?.url || ''}"
+# 使用 年-月-日-标题.jpg 格式保存，避免覆盖旧文件
+DEST_DIR="$HOME/Pictures/Wallpapers"
+mkdir -p "$DEST_DIR"
+FILENAME="${currentDate}-${safeTitle}.jpg"
+DEST="$DEST_DIR/$FILENAME"
 
 # 下载图片
 wget -O "$DEST" "$URL"
 
-# 检查文件是否下载成功
+# 检查文件并应用
 if [ -s "$DEST" ]; then
-    # 同时兼容浅色和深色模式
     gsettings set org.gnome.desktop.background picture-uri "file://$DEST"
     gsettings set org.gnome.desktop.background picture-uri-dark "file://$DEST"
-    echo "壁纸设置成功！"
+    echo "已保存并设为壁纸: $DEST"
 else
-    echo "下载失败，请检查网络。"
+    echo "下载失败。"
 fi
   `.trim();
 
   const autoSyncScript = `
 #!/bin/bash
-# 解决 Cron 运行时的环境变量问题
+# 自动同步 Bing 每日美图并按日期保存
 export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
 
-# 1. 获取 Bing 图片 URL
+# 1. 获取 Bing API 数据
 BING_RES=$(curl -s "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=zh-CN")
 IMG_PATH=$(echo $BING_RES | grep -oP '(?<="url":")[^"]+')
 IMG_URL="https://www.bing.com\${IMG_PATH}"
-DEST="$HOME/Pictures/bing_daily.jpg"
 
-# 2. 下载图片并检查大小
-wget -q -O "$DEST" "$IMG_URL"
+# 提取日期 (YYYYMMDD) 并转换为 YYYY-MM-DD
+RAW_DATE=$(echo $BING_RES | grep -oP '(?<="startdate":")[^"]+')
+FMT_DATE="\${RAW_DATE:0:4}-\${RAW_DATE:4:2}-\${RAW_DATE:6:2}"
 
-# 3. 只有图片不为空时才设置壁纸，防止变黑
+# 2. 准备目录和文件名
+DEST_DIR="$HOME/Pictures/Wallpapers"
+mkdir -p "$DEST_DIR"
+DEST="$DEST_DIR/\${FMT_DATE}-bing.jpg"
+
+# 3. 如果文件不存在则下载，避免重复下载
+if [ ! -f "$DEST" ]; then
+    wget -q -O "$DEST" "$IMG_URL"
+fi
+
+# 4. 设置壁纸
 if [ -s "$DEST" ]; then
     gsettings set org.gnome.desktop.background picture-uri "file://$DEST"
     gsettings set org.gnome.desktop.background picture-uri-dark "file://$DEST"
@@ -58,18 +75,23 @@ fi
   };
 
   return (
-    <div className="glass p-6 rounded-3xl mb-8 border border-white/5">
+    <div className="glass p-6 rounded-3xl mb-8 border border-white/5 shadow-inner">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <i className="fab fa-ubuntu text-3xl text-[#E95420]"></i>
-          <h2 className="text-xl font-bold">Ubuntu 自动化配置</h2>
+          <div className="w-10 h-10 rounded-full bg-[#E95420]/20 flex items-center justify-center">
+            <i className="fab fa-ubuntu text-2xl text-[#E95420]"></i>
+          </div>
+          <div>
+            <h2 className="text-xl font-bold">Ubuntu 自动化历史存档版</h2>
+            <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Files stored in ~/Pictures/Wallpapers</p>
+          </div>
         </div>
         <div className="flex bg-black/40 p-1 rounded-xl">
           <button 
             onClick={() => setActiveTab('auto')}
             className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'auto' ? 'bg-[#E95420] text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
           >
-            全自动每日同步
+            全自动同步 (不覆盖)
           </button>
           <button 
             onClick={() => setActiveTab('current')}
@@ -82,17 +104,17 @@ fi
 
       {activeTab === 'auto' ? (
         <div className="space-y-4">
-          <div className="flex items-start gap-4 p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
-            <i className="fas fa-info-circle text-blue-400 mt-1"></i>
+          <div className="flex items-start gap-4 p-4 bg-green-500/10 border border-green-500/20 rounded-2xl">
+            <i className="fas fa-history text-green-400 mt-1"></i>
             <div>
-              <p className="text-sm font-semibold text-blue-200">为什么之前会黑屏？</p>
-              <p className="text-xs text-blue-200/60 mt-1">
-                Ubuntu 的壁纸命令需要访问 D-Bus 会话。新版本脚本加入了 <code>DBUS_SESSION_BUS_ADDRESS</code> 自动检测，解决了定时任务执行时找不到桌面环境的问题。
+              <p className="text-sm font-semibold text-green-200">已开启“历史存档”模式</p>
+              <p className="text-xs text-green-200/60 mt-1">
+                此脚本会将壁纸保存到 <code>~/Pictures/Wallpapers</code> 文件夹中，并以日期命名前缀（例如：<code>{currentDate}-bing.jpg</code>）。这样你的壁纸库会日益丰富，不会丢失任何一张美图。
               </p>
             </div>
           </div>
-          <div className="bg-black/40 p-4 rounded-xl font-mono text-sm relative group">
-            <pre className="overflow-x-auto text-orange-400 scrollbar-hide">
+          <div className="bg-black/40 p-4 rounded-xl font-mono text-sm relative group ring-1 ring-white/5">
+            <pre className="overflow-x-auto text-orange-400 scrollbar-hide py-2 leading-relaxed">
               <code>{autoSyncScript}</code>
             </pre>
             <button 
@@ -102,27 +124,12 @@ fi
               {copiedType === 'auto' ? <i className="fas fa-check text-green-500"></i> : <i className="far fa-copy"></i>}
             </button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 text-xs">
-            <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-              <p className="font-bold text-gray-400 uppercase mb-2">排查步骤</p>
-              <ul className="list-disc ml-4 space-y-1 text-gray-500">
-                <li>确保安装了 <code>curl</code> 和 <code>wget</code></li>
-                <li>运行 <code>./daily.sh</code> 查看是否有报错</li>
-                <li>检查 <code>~/Pictures/bing_daily.jpg</code> 是否真的有图片</li>
-              </ul>
-            </div>
-            <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-              <p className="font-bold text-gray-400 uppercase mb-2">Cronjob 推荐写法</p>
-              <code className="block bg-black/30 p-2 rounded text-orange-300">@reboot /path/to/daily.sh</code>
-              <p className="mt-2 text-gray-500">开机自动执行一次，最稳妥。</p>
-            </div>
-          </div>
         </div>
       ) : (
         <div className="space-y-4">
-          <p className="text-gray-400 text-sm">此脚本将“立即”把当前网页展示的图片设置为你的桌面壁纸：</p>
-          <div className="bg-black/40 p-4 rounded-xl font-mono text-sm relative group">
-            <pre className="overflow-x-auto text-orange-400">
+          <p className="text-gray-400 text-sm italic">此脚本将保存当前图片为：<code>{currentDate}-{safeTitle}.jpg</code></p>
+          <div className="bg-black/40 p-4 rounded-xl font-mono text-sm relative group ring-1 ring-white/5">
+            <pre className="overflow-x-auto text-orange-400 leading-relaxed">
               <code>{currentScript}</code>
             </pre>
             <button 
